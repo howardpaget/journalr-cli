@@ -25,6 +25,32 @@ namespace JournalrApp
             public string DateTime { get; set; }
         }
 
+        [Verb("edit", HelpText = "Edit an entry")]
+        class EditOptions
+        {
+            [Option('i', "id")]
+            public string Id { get; set; }
+
+            [Option('t', "tags")]
+            public string Tags { get; set; }
+
+            [Option('b', "body", Required = true)]
+            public string Body { get; set; }
+
+            [Option('d', "datetime")]
+            public string DateTime { get; set; }
+        }
+
+        [Verb("rm-tag", HelpText = "Remove tags from an entry")]
+        class RemoveTagsOptions
+        {
+            [Option('i', "id")]
+            public string Id { get; set; }
+
+            [Option('t', "tags")]
+            public string Tags { get; set; }
+        }
+
         [Verb("ls", HelpText = "List entries")]
         class ListOptions
         {
@@ -72,11 +98,13 @@ namespace JournalrApp
         {
 
             var service = new SQLiteJournalrService();
-            CommandLine.Parser.Default.ParseArguments<AddOptions, ListOptions, RemoveOptions, TagOptions, DateOptions>(args)
+            CommandLine.Parser.Default.ParseArguments<AddOptions, ListOptions, RemoveOptions, EditOptions, RemoveTagsOptions, TagOptions, DateOptions>(args)
             .MapResult(
                 (AddOptions opts) => HandleAdd(service, opts),
                 (ListOptions opts) => HandleList(service, opts),
                 (RemoveOptions opts) => HandleRemove(service, opts),
+                (EditOptions opts) => HandleEdit(service, opts),
+                (RemoveTagsOptions opts) => HandleRemoveTags(service, opts),
                 (TagOptions opts) => HandleTag(service, opts),
                 (DateOptions opts) => HandleDate(opts),
                 errs => 1);
@@ -84,14 +112,14 @@ namespace JournalrApp
 
         private static int HandleAdd(IJournalrService service, AddOptions opts)
         {
-            var datetime = new Chronic.Parser().Parse(opts.DateTime ?? "").Start;
+            var datetime = new Chronic.Parser().Parse(opts.DateTime ?? "now").Start;
             if (datetime == null)
             {
                 Console.WriteLine($"Could not parse {opts.DateTime}");
                 return 1;
             }
 
-            var entry = new Entry { EntryId = GenerateId(), Text = opts.Body, EntryDate = datetime.Value, CreatedDate = DateTime.Now, Tags = (opts.Tags ?? "").Split(',').ToList() };
+            var entry = new Entry { EntryId = GenerateId(), Text = opts.Body, EntryDate = datetime.Value, CreatedDate = DateTime.Now, Tags = string.IsNullOrWhiteSpace(opts.Tags) ? new List<string>() : opts.Tags.Split(',').ToList() };
             if (service.AddEntry(entry))
                 Console.WriteLine($"Added entry: { entry.EntryId }");
             else
@@ -156,6 +184,48 @@ namespace JournalrApp
             else
                 Console.WriteLine("Tag failed");
 
+            return 0;
+        }
+
+        private static int HandleEdit(IJournalrService service, EditOptions opts)
+        {
+            var entry = service.GetEntry(opts.Id);
+            
+            if(opts.Body != null)
+                entry.Text = opts.Body;
+
+            if(opts.DateTime != null)
+                entry.EntryDate = new Chronic.Parser().Parse(opts.DateTime).Start.Value;
+            
+            if(opts.Tags != null){
+                var newTags = new List<string>();
+                foreach(var tag in opts.Tags.Split(','))
+                    if(!entry.Tags.Contains(tag))
+                        newTags.Add(tag);
+                entry.Tags = newTags;
+            }
+            if(service.UpdateEntry(entry))
+                Console.WriteLine("Edit successful");
+            else
+                Console.WriteLine("Edit failed");
+
+            return 0;
+        }
+
+        private static int HandleRemoveTags(IJournalrService service, RemoveTagsOptions opts)
+        {
+            var entry = service.GetEntry(opts.Id);
+            
+            if(string.IsNullOrWhiteSpace(opts.Tags))
+                entry.Tags = new List<string>();
+            else{
+            var tags = opts.Tags.Split(',').ToList();
+                entry.Tags = entry.Tags.Where(t => !opts.Tags.Contains(t)).ToList();
+            }
+            if(service.UpdateEntry(entry))
+                Console.WriteLine("Edit successful");
+            else
+                Console.WriteLine("Edit failed");
             return 0;
         }
 

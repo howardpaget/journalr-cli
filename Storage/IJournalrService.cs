@@ -8,6 +8,8 @@ namespace JournalrApp.Storage
     public interface IJournalrService
     {
         bool AddEntry(Entry entry);
+        bool UpdateEntry(Entry entry);
+        Entry GetEntry(string id);
         List<Entry> ListEntries(Dictionary<string, Object> query);
         bool RemoveEntry(int count);
         bool RemoveEntry(string id);

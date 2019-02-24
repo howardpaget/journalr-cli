@@ -59,6 +59,8 @@ namespace JournalrApp.Storage
 
                     foreach (var tag in entry.Tags)
                     {
+                        if(string.IsNullOrWhiteSpace(tag))
+                            continue;
                         var insertTagCommand = connection.CreateCommand();
                         insertTagCommand.Transaction = transaction;
                         insertTagCommand.CommandText = "INSERT INTO Tag ( entry_id, tag ) VALUES ( $id, $tag )";
@@ -72,6 +74,109 @@ namespace JournalrApp.Storage
                     transaction.Commit();
 
                     return result;
+                }
+            }
+        }
+
+        public bool UpdateEntry(Entry entry)
+        {
+            using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(this.Home, ".journalr", "journalr.db") }.ToString()))
+            {
+                connection.Open();
+                using (var transaction = connection.BeginTransaction())
+                {
+                    var insertCommand = connection.CreateCommand();
+                    insertCommand.Transaction = transaction;
+                    insertCommand.CommandText = "UPDATE Entry SET text = $text, entry_date = $entry_date WHERE id = $id";
+                    insertCommand.Parameters.AddWithValue("$id", entry.EntryId);
+                    insertCommand.Parameters.AddWithValue("$text", entry.Text);
+                    insertCommand.Parameters.AddWithValue("$entry_date", entry.EntryDate);
+
+                    var result = insertCommand.ExecuteNonQuery() == 1;
+
+                    var deleteTagsCommand = connection.CreateCommand();
+                    deleteTagsCommand.Transaction = transaction;
+                    deleteTagsCommand.CommandText = "DELETE FROM Tag WHERE entry_id = $id";
+                    deleteTagsCommand.Parameters.AddWithValue("$id", entry.EntryId);
+
+                    deleteTagsCommand.ExecuteNonQuery();
+
+                    foreach (var tag in entry.Tags)
+                    {
+                        if(string.IsNullOrWhiteSpace(tag))
+                            continue;
+                        var insertTagCommand = connection.CreateCommand();
+                        insertTagCommand.Transaction = transaction;
+                        insertTagCommand.CommandText = "INSERT INTO Tag ( entry_id, tag ) VALUES ( $id, $tag )";
+                        insertTagCommand.Parameters.AddWithValue("$id", entry.EntryId);
+                        insertTagCommand.Parameters.AddWithValue("$tag", tag);
+
+                        insertTagCommand.ExecuteNonQuery();
+                    }
+
+
+                    transaction.Commit();
+
+                    return result;
+                }
+            }
+        }
+
+        public Entry GetEntry(string id)
+        {
+            using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(this.Home, ".journalr", "journalr.db") }.ToString()))
+            {
+                connection.Open();
+                using (var transaction = connection.BeginTransaction())
+                {
+                    var selectCommand = connection.CreateCommand();
+                    selectCommand.Transaction = transaction;
+
+                    var selectTagCommand = connection.CreateCommand();
+                    selectTagCommand.Transaction = transaction;
+
+                    var sql = "SELECT id, text, entry_date, created_date, tags FROM Entry WHERE id = $id";
+                    var tagSql = "SELECT id, Tag.tag FROM Entry LEFT JOIN Tag ON Entry.id = Tag.entry_id WHERE id = $id ORDER BY entry_date DESC";
+
+                    selectCommand.CommandText = sql;
+                    selectTagCommand.CommandText = tagSql;
+
+                    selectCommand.Parameters.AddWithValue("$id", id);
+                    selectTagCommand.Parameters.AddWithValue("$id", id);
+
+                    var tagMap = new Dictionary<string, List<string>>();
+                    using (var reader = selectTagCommand.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            var entryId = reader.GetString(0);
+                            if (!reader.IsDBNull(1))
+                            {
+                                var tag = reader.GetString(1);
+                                if (!tagMap.ContainsKey(entryId))
+                                    tagMap[entryId] = new List<string>();
+
+                                tagMap[entryId].Add(tag);
+                            }
+                        }
+                    }
+
+                    using (var reader = selectCommand.ExecuteReader())
+                    {
+                        var entries = new List<Entry>();
+                        while (reader.Read())
+                        {
+                            return new Entry
+                            {
+                                EntryId = reader.GetString(0),
+                                Text = reader.GetString(1),
+                                EntryDate = reader.GetDateTime(2),
+                                CreatedDate = reader.GetDateTime(3),
+                                Tags = tagMap.ContainsKey(reader.GetString(0)) ? tagMap[reader.GetString(0)] : new List<string>()
+                            };
+                        }
+                        return null;
+                    }
                 }
             }
         }
@@ -156,6 +261,14 @@ namespace JournalrApp.Storage
                 connection.Open();
                 using (var transaction = connection.BeginTransaction())
                 {
+
+                    var deleteTagsCommand = connection.CreateCommand();
+                    deleteTagsCommand.Transaction = transaction;
+                    deleteTagsCommand.CommandText = "DELETE FROM Tag WHERE entry_id IN (SELECT id FROM Entry ORDER BY entry_date DESC LIMIT $n)";
+                    deleteTagsCommand.Parameters.AddWithValue("$n", count);
+
+                    var result1 = deleteTagsCommand.ExecuteNonQuery() > 0;
+
                     var insertCommand = connection.CreateCommand();
                     insertCommand.Transaction = transaction;
                     insertCommand.CommandText = "DELETE FROM Entry WHERE id IN (SELECT id FROM Entry ORDER BY entry_date DESC LIMIT $n)";
@@ -176,6 +289,14 @@ namespace JournalrApp.Storage
                 connection.Open();
                 using (var transaction = connection.BeginTransaction())
                 {
+                    var deleteTagsCommand = connection.CreateCommand();
+                    deleteTagsCommand.Transaction = transaction;
+                    deleteTagsCommand.CommandText = "DELETE FROM Tag WHERE entry_id = $id";
+                    deleteTagsCommand.Parameters.AddWithValue("$id", id);
+
+                    var result1 = deleteTagsCommand.ExecuteNonQuery() == 1;
+
+
                     var insertCommand = connection.CreateCommand();
                     insertCommand.Transaction = transaction;
                     insertCommand.CommandText = "DELETE FROM Entry WHERE id = $id";
@@ -248,6 +369,7 @@ namespace JournalrApp.Storage
                             entryIds.Add(reader.GetString(0));
                         }
                     }
+
 
                     foreach (var id in entryIds)
                     {
